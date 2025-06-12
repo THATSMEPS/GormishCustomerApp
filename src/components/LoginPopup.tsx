@@ -1,0 +1,172 @@
+import { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { GoogleLogin, CredentialResponse } from '@react-oauth/google';
+
+interface Props {
+  isOpen: boolean;
+  onClose: () => void;
+}
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://gormishbackend.onrender.com/api';
+// const CUSTOMER_ID = "b0c7a268-b38b-4d4c-b0f9-fc7606032984";
+
+export const LoginPopup = ({ isOpen, onClose }: Props) => {
+  const [isSigningIn, setIsSigningIn] = useState(false);
+  const [authMessage, setAuthMessage] = useState<string | null>(null);
+
+  const handleGoogleLoginSuccess = async (credentialResponse: CredentialResponse) => {
+    setIsSigningIn(true);
+    setAuthMessage(null);
+
+    if (!credentialResponse.credential) {
+      setAuthMessage("Google authentication failed: No credential received.");
+      setIsSigningIn(false);
+      return;
+    }
+
+    console.log("LoginPopup: Google ID Token received from frontend:", credentialResponse.credential);
+
+    try {
+      const backendResponse = await fetch(`${API_BASE_URL}/auth/google`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ access_token: credentialResponse.credential }),
+      });
+
+      console.log(`LoginPopup: Backend Response Status: ${backendResponse.status} ${backendResponse.statusText}`);
+      console.log(`LoginPopup: Backend Response 'ok' property: ${backendResponse.ok}`);
+
+      const data = await backendResponse.json();
+      console.log("LoginPopup: Full Backend Response Data:", data);
+
+      const responseData = data.data;
+
+      console.log(`LoginPopup: Check Conditions:`);
+      console.log(` - backendResponse.ok: ${backendResponse.ok}`);
+      console.log(` - data.success: ${data.success}`);
+      console.log(` - responseData.session exists: ${!!responseData.session}`);
+      console.log(` - responseData.user exists: ${!!responseData.user}`);
+
+      if (responseData.session) {
+        console.log(` - responseData.session.authToken (from backend): ${responseData.session.authToken}`);
+        console.log(` - responseData.session.expires_at: ${responseData.session.expires_at}`);
+      }
+      if (responseData.user) {
+        console.log(` - responseData.user.id: ${responseData.user.id}`);
+        console.log(` - responseData.user.email: ${responseData.user.email}`);
+        console.log(` - responseData.user.name: ${responseData.user.name}`);
+      }
+
+      if (backendResponse.ok && data.success && responseData.session && responseData.user) {
+        console.log("LoginPopup: ALL CONDITIONS MET. Proceeding to store token and close popup.");
+
+        const tokenToStore = responseData.session.authToken;
+        console.log("LoginPopup: Value of tokenToStore before setting to localStorage:", tokenToStore);
+
+        localStorage.setItem('customerId', responseData.session.userId);
+        localStorage.setItem('authToken', tokenToStore);
+        localStorage.setItem('expiresAt', responseData.session.expires_at ? responseData.session.expires_at.toString() : '');
+
+        localStorage.setItem('customerData', JSON.stringify({
+          id: responseData.user.id,
+          name: responseData.user.name || 'Google User',
+          phone: responseData.user.phone || '',
+          email: responseData.user.email,
+          address: responseData.user.address || null,
+          area: responseData.user.area || null,
+          orders: responseData.user.orders || []
+        }));
+
+        const storedAuthToken = localStorage.getItem('authToken');
+        console.log("LoginPopup: AuthToken read from localStorage IMMEDIATELY after set (inside LoginPopup):", storedAuthToken);
+
+        setAuthMessage("Google Sign-In successful! Redirecting...");
+
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        onClose();
+      } else {
+        console.error("LoginPopup: One or more conditions FAILED. Displaying error message.");
+        setAuthMessage(data.message || 'Google sign-in with backend failed. Please try again.');
+      }
+    } catch (error) {
+      console.error("LoginPopup: Caught error during backend communication or JSON parsing:", error);
+      setAuthMessage('Network error or unexpected issue. Please check console.');
+    } finally {
+      setIsSigningIn(false);
+    }
+  };
+
+  const handleGoogleLoginError = () => {
+    console.log('LoginPopup: Google Login Failed via @react-oauth/google.');
+    setAuthMessage("Google Sign-In failed. Please try again.");
+    setIsSigningIn(false);
+  };
+
+  useEffect(() => {
+  }, []);
+
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 flex items-center justify-center z-50 px-4"
+        >
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 bg-gray-200 bg-opacity-50 backdrop-blur-sm"
+          />
+
+          <motion.div
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.9, opacity: 0 }}
+            className="relative bg-[#6552FF]/80 backdrop-blur-xl rounded-[30px] p-8 w-full max-w-md text-white shadow-[0_8px_32px_0_rgba(31,38,135,0.37)] border border-white/20"
+            style={{
+              WebkitBackdropFilter: 'blur(8px)',
+              backdropFilter: 'blur(8px)',
+            }}
+          >
+            <motion.div
+              initial={{ y: 20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              className="text-center"
+            >
+              <h2 className="text-2xl font-bold mb-6">
+                Login To Order
+              </h2>
+
+              <div className="space-y-6 flex justify-center">
+                <GoogleLogin
+                  onSuccess={handleGoogleLoginSuccess}
+                  onError={handleGoogleLoginError}
+                />
+
+                {authMessage && (
+                  <p className={`text-sm mt-1 ${authMessage.includes('successful') ? 'text-green-200' : 'text-red-200'}`}>{authMessage}</p>
+                )}
+                {isSigningIn && (
+                  <div className="flex justify-center mt-4">
+                    <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+
+            <p className="text-sm text-center mt-6 text-white/70">
+              By Signing In You Are Agreeing Our Terms & Conditions And Privacy Policies
+            </p>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+};
