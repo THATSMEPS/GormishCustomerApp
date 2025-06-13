@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { GoogleLogin, CredentialResponse } from '@react-oauth/google';
 
 interface Props {
   isOpen: boolean;
@@ -8,103 +7,69 @@ interface Props {
 }
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://gormishbackend.onrender.com/api';
-// const CUSTOMER_ID = "b0c7a268-b38b-4d4c-b0f9-fc7606032984";
+
+// Google OAuth parameters
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+const REDIRECT_URI = import.meta.env.VITE_GOOGLE_REDIRECT_URI || 'myapp://auth'; // Custom scheme or deep link
 
 export const LoginPopup = ({ isOpen, onClose }: Props) => {
-  const [isSigningIn, setIsSigningIn] = useState(false);
   const [authMessage, setAuthMessage] = useState<string | null>(null);
+  const [isSigningIn, setIsSigningIn] = useState(false);
 
-  const handleGoogleLoginSuccess = async (credentialResponse: CredentialResponse) => {
+  // Function to open Google login page externally
+  const openGoogleLogin = () => {
     setIsSigningIn(true);
     setAuthMessage(null);
 
-    if (!credentialResponse.credential) {
-      setAuthMessage("Google authentication failed: No credential received.");
-      setIsSigningIn(false);
-      return;
-    }
+    // Construct the Google OAuth URL with required parameters
+    const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+      `client_id=${encodeURIComponent(GOOGLE_CLIENT_ID)}` +
+      `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
+      `&response_type=token` +
+      `&scope=openid%20email%20profile` +
+      `&prompt=select_account`;
 
-    console.log("LoginPopup: Google ID Token received from frontend:", credentialResponse.credential);
-
-    try {
-      const backendResponse = await fetch(`${API_BASE_URL}/auth/google`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ access_token: credentialResponse.credential }),
-      });
-
-      console.log(`LoginPopup: Backend Response Status: ${backendResponse.status} ${backendResponse.statusText}`);
-      console.log(`LoginPopup: Backend Response 'ok' property: ${backendResponse.ok}`);
-
-      const data = await backendResponse.json();
-      console.log("LoginPopup: Full Backend Response Data:", data);
-
-      const responseData = data.data;
-
-      console.log(`LoginPopup: Check Conditions:`);
-      console.log(` - backendResponse.ok: ${backendResponse.ok}`);
-      console.log(` - data.success: ${data.success}`);
-      console.log(` - responseData.session exists: ${!!responseData.session}`);
-      console.log(` - responseData.user exists: ${!!responseData.user}`);
-
-      if (responseData.session) {
-        console.log(` - responseData.session.authToken (from backend): ${responseData.session.authToken}`);
-        console.log(` - responseData.session.expires_at: ${responseData.session.expires_at}`);
-      }
-      if (responseData.user) {
-        console.log(` - responseData.user.id: ${responseData.user.id}`);
-        console.log(` - responseData.user.email: ${responseData.user.email}`);
-        console.log(` - responseData.user.name: ${responseData.user.name}`);
-      }
-
-      if (backendResponse.ok && data.success && responseData.session && responseData.user) {
-        console.log("LoginPopup: ALL CONDITIONS MET. Proceeding to store token and close popup.");
-
-        const tokenToStore = responseData.session.authToken;
-        console.log("LoginPopup: Value of tokenToStore before setting to localStorage:", tokenToStore);
-
-        localStorage.setItem('customerId', responseData.session.userId);
-        localStorage.setItem('authToken', tokenToStore);
-        localStorage.setItem('expiresAt', responseData.session.expires_at ? responseData.session.expires_at.toString() : '');
-
-        localStorage.setItem('customerData', JSON.stringify({
-          id: responseData.user.id,
-          name: responseData.user.name || 'Google User',
-          phone: responseData.user.phone || '',
-          email: responseData.user.email,
-          address: responseData.user.address || null,
-          area: responseData.user.area || null,
-          orders: responseData.user.orders || []
-        }));
-
-        const storedAuthToken = localStorage.getItem('authToken');
-        console.log("LoginPopup: AuthToken read from localStorage IMMEDIATELY after set (inside LoginPopup):", storedAuthToken);
-
-        setAuthMessage("Google Sign-In successful! Redirecting...");
-
-        await new Promise(resolve => setTimeout(resolve, 100));
-
-        onClose();
-      } else {
-        console.error("LoginPopup: One or more conditions FAILED. Displaying error message.");
-        setAuthMessage(data.message || 'Google sign-in with backend failed. Please try again.');
-      }
-    } catch (error) {
-      console.error("LoginPopup: Caught error during backend communication or JSON parsing:", error);
-      setAuthMessage('Network error or unexpected issue. Please check console.');
-    } finally {
-      setIsSigningIn(false);
-    }
+    // Open Google login page in a new popup window with specified dimensions
+    // This allows the user to sign in and then redirect back to the app via the redirect URI
+    window.open(googleAuthUrl, '_blank', 'width=500,height=600');
   };
 
-  const handleGoogleLoginError = () => {
-    console.log('LoginPopup: Google Login Failed via @react-oauth/google.');
-    setAuthMessage("Google Sign-In failed. Please try again.");
-    setIsSigningIn(false);
-  };
-
+  // Listen for redirect back with token in URL hash
   useEffect(() => {
-  }, []);
+    if (!isOpen) return;
+
+    const handleMessage = (event: MessageEvent) => {
+      if (event.origin !== window.location.origin) return;
+
+      const { type, token } = event.data || {};
+      if (type === 'GOOGLE_AUTH_SUCCESS' && token) {
+        // Handle token received from external login
+        setAuthMessage('Google Sign-In successful! Redirecting...');
+        localStorage.setItem('authToken', token);
+        setIsSigningIn(false);
+        onClose();
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+
+    // Also check URL hash for token (in case of redirect in same window)
+    const hash = window.location.hash;
+    if (hash) {
+      const params = new URLSearchParams(hash.replace('#', ''));
+      const accessToken = params.get('access_token');
+      if (accessToken) {
+        setAuthMessage('Google Sign-In successful! Redirecting...');
+        localStorage.setItem('authToken', accessToken);
+        setIsSigningIn(false);
+        onClose();
+      }
+    }
+
+    return () => {
+      window.removeEventListener('message', handleMessage);
+    };
+  }, [isOpen, onClose]);
 
   return (
     <AnimatePresence>
@@ -142,21 +107,38 @@ export const LoginPopup = ({ isOpen, onClose }: Props) => {
               </h2>
 
               <div className="space-y-6 flex justify-center">
-                <GoogleLogin
-                  onSuccess={handleGoogleLoginSuccess}
-                  onError={handleGoogleLoginError}
-                />
+                <button
+                  onClick={openGoogleLogin}
+                  disabled={isSigningIn}
+                  className="flex items-center justify-center gap-3 bg-white border border-gray-300 rounded-md px-6 py-3 shadow-sm hover:shadow-md disabled:opacity-50 transition-shadow"
+                >
+                  <svg
+                    className="w-5 h-5"
+                    xmlns="http://www.w3.org/2000/svg"
+                    viewBox="0 0 533.5 544.3"
+                  >
+                    <path
+                      fill="#4285F4"
+                      d="M533.5 278.4c0-18.5-1.5-36.3-4.3-53.6H272v101.3h146.9c-6.3 34-25.4 62.8-54.3 82v68h87.7c51.3-47.3 81.2-116.7 81.2-197.7z"
+                    />
+                    <path
+                      fill="#34A853"
+                      d="M272 544.3c73.7 0 135.7-24.4 180.9-66.1l-87.7-68c-24.4 16.3-55.7 26-93.2 26-71.6 0-132.3-48.3-154.1-113.1H27.6v70.9c45.2 89.1 137.7 150.3 244.4 150.3z"
+                    />
+                    <path
+                      fill="#FBBC05"
+                      d="M117.9 323.1c-10.7-31.8-10.7-66.1 0-97.9v-70.9H27.6c-38.6 75.3-38.6 164.7 0 240l90.3-71.2z"
+                    />
+                    <path
+                      fill="#EA4335"
+                      d="M272 107.7c39.9 0 75.7 13.7 103.9 40.7l77.9-77.9C405.7 24.6 344.1 0 272 0 165.3 0 72.8 61.2 27.6 150.3l90.3 70.9c21.8-64.8 82.5-113.5 154.1-113.5z"
+                    />
+                  </svg>
+                  {isSigningIn ? 'Signing in...' : 'Sign in with Google'}
+                </button>
 
                 {authMessage && (
                   <p className={`text-sm mt-1 ${authMessage.includes('successful') ? 'text-green-200' : 'text-red-200'}`}>{authMessage}</p>
-                )}
-                {isSigningIn && (
-                  <div className="flex justify-center mt-4">
-                    <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                  </div>
                 )}
               </div>
             </motion.div>
