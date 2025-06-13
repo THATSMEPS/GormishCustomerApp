@@ -10,7 +10,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://gormishbacken
 
 // Google OAuth parameters
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
-const REDIRECT_URI = import.meta.env.VITE_LOCAL_URL || `${window.location.origin}/`; // Use web app root as fallback redirect URI
+const REDIRECT_URI = import.meta.env.VITE_GOOGLE_REDIRECT_URI || `${window.location.origin}/`; // Use web app root as fallback redirect URI
 
 export const LoginPopup = ({ isOpen, onClose }: Props) => {
   const [authMessage, setAuthMessage] = useState<string | null>(null);
