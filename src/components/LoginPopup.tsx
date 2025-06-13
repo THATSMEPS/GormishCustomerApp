@@ -10,7 +10,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://gormishbacken
 
 // Google OAuth parameters
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
-const REDIRECT_URI = import.meta.env.VITE_GOOGLE_REDIRECT_URI || 'myapp://auth'; // Custom scheme or deep link
+const REDIRECT_URI = import.meta.env.VITE_GOOGLE_REDIRECT_URI || `${window.location.origin}/`; // Use web app root as fallback redirect URI
 
 export const LoginPopup = ({ isOpen, onClose }: Props) => {
   const [authMessage, setAuthMessage] = useState<string | null>(null);
@@ -21,18 +21,42 @@ export const LoginPopup = ({ isOpen, onClose }: Props) => {
     setIsSigningIn(true);
     setAuthMessage(null);
 
-    // Construct the Google OAuth URL with required parameters
+    console.log("Using redirect URI for Google OAuth:", REDIRECT_URI);
+
+    // Retrieve customer ID from localStorage to include in OAuth state parameter
+    const storedCustomerData = localStorage.getItem('customerData');
+    let customerIdForState = '';
+    if (storedCustomerData) {
+      try {
+        const parsedCustomer = JSON.parse(storedCustomerData);
+        if (parsedCustomer && parsedCustomer.id) {
+          customerIdForState = parsedCustomer.id;
+        }
+      } catch (e) {
+        console.error("Error parsing customerData from localStorage for OAuth state:", e);
+      }
+    }
+
+    // Encode state parameter with customer ID (can include other info if needed)
+    const stateParam = encodeURIComponent(JSON.stringify({ customerId: customerIdForState }));
+
+    // Construct the Google OAuth URL with required parameters and state
     const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
       `client_id=${encodeURIComponent(GOOGLE_CLIENT_ID)}` +
       `&redirect_uri=${encodeURIComponent(REDIRECT_URI)}` +
       `&response_type=token` +
       `&scope=openid%20email%20profile` +
-      `&prompt=select_account`;
+      `&prompt=select_account` +
+      `&state=${stateParam}`;
 
     // Open Google login page in a new popup window with specified dimensions
     // This allows the user to sign in and then redirect back to the app via the redirect URI
     window.open(googleAuthUrl, '_blank', 'width=500,height=600');
   };
+
+  // NOTE: Ensure that the redirect URI (REDIRECT_URI) is registered as an authorized redirect URI
+  // in your Google Cloud Console OAuth client configuration. For custom schemes like 'myapp://auth',
+  // this must be explicitly added to avoid "invalid_request" errors.
 
   // Listen for redirect back with token in URL hash
   useEffect(() => {
